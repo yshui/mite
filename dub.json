@@ -1,0 +1,6 @@
+{
+	"name": "mite",
+	"dependencies": {
+		"sdpc": { "path": "sdpc" }
+	}
+}

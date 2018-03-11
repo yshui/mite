@@ -1,0 +1,3 @@
+[submodule "source/sdpc"]
+	path = sdpc
+	url = https://github.com/yshui/sdpc
