@@ -43,9 +43,11 @@ class VarRef: Lvalue {
 }
 
 class Call: Expr {
-	Expr func;
+	Lvalue func;
 	Expr[] args;
-	pure this(Expr v, Expr[] exprs) {
+	bool await;
+	pure this(bool a, Lvalue v, Expr[] exprs) {
+		await = a;
 		func = v;
 		args = exprs;
 	}
@@ -54,7 +56,7 @@ class Call: Expr {
 		import std.string : join;
 		import std.array : array;
 		import std.conv : to;
-		return func.toString~"("~args.map!"a.toString".join(", ").array.to!string~")";
+		return (await ? "$" : "")~func.toString~"("~args.map!"a.toString".join(", ").array.to!string~")";
 	}
 }
 
@@ -63,9 +65,16 @@ class Number: Expr {
 	pure this(int i) { n = i; }
 	pure this(double d) { n = d; }
 	override string toString() const {
-		import std.math : isNaN;
 		import std.conv : to;
 		return n.to!string;
+	}
+}
+
+class Boolean: Expr {
+	bool t;
+	pure this(bool b) { t = b; }
+	override string toString() const {
+		return t ? "true" : "false";
 	}
 }
 
@@ -74,7 +83,7 @@ class Uop: Expr {
 	Expr e;
 	pure this(string o, Expr _e) { op = o; e = _e; }
 	override string toString() const {
-		return "("~op~e.toString~")";
+		return "("~op~e.toString~")"~(type is null ? "" : type.toString);
 	}
 }
 
@@ -87,7 +96,7 @@ class Bop: Expr {
 		rhs = rhs_;
 	}
 	override string toString() const {
-		return "("~lhs.toString~op~rhs.toString~")";
+		return "("~lhs.toString~op~rhs.toString~")"~(type is null ? "" : type.toString);
 	}
 }
 
@@ -149,6 +158,30 @@ class While: Stmt {
 	}
 	override string toString() const {
 		return "while "~cond.toString~" "~body.toString;
+	}
+}
+
+class Loop: Stmt {
+	Block body;
+	Expr cond;
+	pure this(Block b, Expr e) {
+		cond = e;
+		body = b;
+	}
+	override string toString() const {
+		return "loop "~body.toString~(cond is null ? "" : "until "~cond.toString~" ;");
+	}
+}
+
+class Assign: Stmt {
+	Lvalue lhs;
+	Expr rhs;
+	pure this(Lvalue lv, Expr e) {
+		lhs = lv;
+		rhs = e;
+	}
+	override string toString() const {
+		return lhs.toString~" = "~rhs.toString~";";
 	}
 }
 

@@ -3,7 +3,7 @@ import ast;
 import sdpc;
 import common;
 import symbol;
-import type : Type, BaseType, RefType, ArrayType, DynamicArrayType;
+import type : BaseType, RefType, ArrayType, DynamicArrayType;
 import std.functional, std.array, std.conv;
 
 alias Result(T) = sdpc.Result!(I, T, Err!I);
@@ -92,7 +92,11 @@ Stmt make_while(R)(R i) {
 }
 
 Stmt make_loop(R)(R i) {
-	return null;
+	return new Loop(i.v!3, i.v!4.isNull ? null : i.v!4);
+}
+
+Stmt make_assign(R)(R i) {
+	return new Assign(i.v!0, i.v!2);
 }
 
 auto declaration(I i) {
@@ -109,10 +113,12 @@ auto statement(I i) {
 	return
 	i.ws!(choice!(
 	        expression_statement,
-	        block_stmt,
+	        assign_statement,
+	        block_statement,
 	        declaration,
 	        if_statement,
-	        while_statement
+	        while_statement,
+	        loop_statment
 	));
 }
 
@@ -126,7 +132,11 @@ Result!Block block(I i) {
 	return i.pipe!(between!(token_ws!"{", statement_list, token_ws!"}"), wrap!make_block);
 }
 
-alias block_stmt = pipe!(block, to_stmt);
+Result!Stmt assign_statement(I i) {
+	return i.pipe!(seq!(lvalue, token_ws!"=", expression, token_ws!";"), wrap!make_assign);
+}
+
+alias block_statement = pipe!(block, to_stmt);
 
 auto func(I i) {
 	return
@@ -170,7 +180,7 @@ auto loop_statment(I i) {
 	             optional!block_tag,
 	             skip!whitespace,
 	             block,
-	             optional!(seq!(token_ws!"until", expression))
+	             optional!(between!(token_ws!"until", expression, token_ws!";"))
 	), wrap!make_loop);
 }
 
@@ -190,24 +200,16 @@ auto make_bop(R)(R[] i) {
 	return i[2..$].fold!((a, b) => new Bop(a, b.v!1, b.v!0))(e);
 }
 
-Expr make_atom(R)(R i) {
-	Expr ret = i.v!0;
-	foreach(es; i.v!1) {
-		ret = new Call(ret, es);
-	}
-	return ret;
+Expr make_call(R)(R i) {
+	return new Call(!i.v!0.isNull, i.v!1, i.v!2);
 }
 
 auto expression_list(R)(R i) {
 	import std.algorithm : map;
-	return i.pipe!(chain!(expression, token_ws!",", true), wrap!((a) {
-		import std.stdio;
-		writeln(a.length);
-		return a.map!"a.v!0".array;
-	}));
+	return i.pipe!(chain!(expression, token_ws!",", true), wrap!((a) => a.map!"a.v!0".array));
 }
 
-auto make_varref(R)(R i) {
+Lvalue make_varref(R)(R i) {
 	return new VarRef(i.to!string);
 }
 
@@ -218,24 +220,25 @@ auto lvalue(R)(R i) {
 alias lvalue_expr = pipe!(lvalue, wrap!((a) => cast(Expr)a));
 
 private alias prefix_op = ws!(choice!(token!"!", token!"~", token!"-", token!"+"));
-private alias atom0 = ws!(choice!(lvalue_expr));
-private alias atom_no_call =
+private alias atom =
 ws!(choice!(
-            pipe!(seq!(many!(prefix_op, true), atom0), wrap!make_atom_uop),
+            pipe!(choice!(token!"true", token!"false"), wrap!((a) => cast(Expr)new Boolean(a.to!string == "true"))),
+            pipe!(seq!(optional!(token_ws!"$"), lvalue, between!(token_ws!"(", expression_list, token_ws!")")), wrap!make_call),
+            pipe!(seq!(many!(prefix_op, true), lvalue), wrap!make_atom_uop),
             pipe!(number, wrap!((a) => cast(Expr)new Number(a))),
             between!(token_ws!"(", expression, token!")"),
-            atom0,
+            lvalue_expr,
 ));
-
-private alias atom = pipe!(seq!(atom_no_call, many!(between!(token_ws!"(", expression_list, token_ws!")"), true)), wrap!make_atom);
 
 private alias op_pre1 = ws!(choice!(token!"*", token!"/"));
 private alias term1 = pipe!(chain!(atom, op_pre1), wrap!make_bop);
 private alias op_pre2 = ws!(choice!(token!"+", token!"-"));
 private alias term2 = pipe!(chain!(term1, op_pre2), wrap!make_bop);
-private alias op_pre3 = ws!(choice!(token!"||", token!"&&"));
+private alias op_pre3 = ws!(choice!(token!"==", token!"<=", token!">=", token!">", token!"<", token!"!="));
 private alias term3 = pipe!(chain!(term2, op_pre3), wrap!make_bop);
+private alias op_pre4 = ws!(choice!(token!"||", token!"&&"));
+private alias term4 = pipe!(chain!(term3, op_pre4), wrap!make_bop);
 
 Result!Expr expression(InputType i) {
-	return term3(i);
+	return term4(i);
 }

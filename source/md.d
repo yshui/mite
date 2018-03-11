@@ -1,4 +1,11 @@
 module md;
+
+class OverloadNotFoundException : Exception {
+	this(string err, string file=__FILE__, int line=__LINE__) {
+		super(err, file, line);
+	}
+}
+
 template multiDispatch(alias func) {
 	import std.traits;
 	import std.meta;
@@ -31,21 +38,24 @@ template multiDispatch(alias func) {
 	template isIClass(T) {
 		enum isIClass = is(T == class) || is(T == interface);
 	}
-	auto multiDispatch(T...)(T args) if (allSatisfy!(isIClass, T)) {
+	auto multiDispatch(T...)(T args) {
 		import std.algorithm : map;
 		import std.string : join;
 		import std.array : array;
 		import std.conv : to;
 		alias ovrld =
 		    filterOverloads!(_types!T, __traits(getOverloads, __traits(parent, func), __traits(identifier, func)));
+		static assert(ovrld.length != 0, "No suitable overload found for argument type: "~T.stringof);
 		TypeInfo[T.length] ti;
 		static foreach(i; 0..T.length)
-			ti[i] = typeid(args[i]);
+			static if (isIClass!(T[i]))
+				ti[i] = typeid(args[i]);
 		oloop:foreach(o; ovrld) {
 			alias p = Parameters!o;
 			static foreach(i; 0..T.length) {
-				if (ti[i] != typeid(p[i]))
-					continue oloop;
+				static if (isIClass!(T[i]))
+					if (ti[i] != typeid(p[i]))
+						continue oloop;
 			}
 			p args2;
 			static foreach(i; 0..T.length) {
@@ -55,7 +65,7 @@ template multiDispatch(alias func) {
 			return o(args2);
 		}
 
-		assert(false, "no suitable overload of function `"~fullyQualifiedName!func~"', "~
+		throw new OverloadNotFoundException("no suitable overload of function `"~fullyQualifiedName!func~"', "~
 		       "argument types: "~ti[].map!((a) => a.toString).join(", ").array.to!string);
 	}
 }

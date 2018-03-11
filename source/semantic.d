@@ -4,14 +4,7 @@ import common;
 import ast;
 import md;
 import type;
-
-class SemanticError: Exception {
-	Span x;
-	this(string err, Span x=Span.init, string file=__FILE__, int line=__LINE__) {
-		super(err, file, line);
-		this.x = x;
-	}
-}
+import resolver;
 
 void semanticImpl(BaseType ty, Scope s) {
 	if (ty.is_auto) {
@@ -51,10 +44,21 @@ void semanticImpl(Variable v, Scope s) {
 void semanticImpl(Bop e, Scope s) {
 	e.lhs.semantic(s);
 	e.rhs.semantic(s);
+	assert(e.lhs.type !is null);
+	assert(e.rhs.type !is null);
+	if (e.lhs.type.is_auto)
+		throw new SemanticError("Unresolved auto type in "~e.lhs.toString);
+	if (e.rhs.type.is_auto)
+		throw new SemanticError("Unresolved auto type in "~e.rhs.toString);
+	e.type = bopResolver(e.lhs.type, e.op, e.rhs.type);
 }
 
 void semanticImpl(Uop e, Scope s) {
 	e.e.semantic(s);
+	assert(e.e.type !is null);
+	if (e.e.type.is_auto)
+		throw new SemanticError("Unresolved auto type in "~e.e.toString);
+	e.type = uopResolver(e.op, e.e.type);
 }
 
 void semanticImpl(Decl d, Scope s) {
@@ -80,6 +84,7 @@ void semanticImpl(VarRef v, Scope s) {
 		throw new SemanticError("Symbol `"~v.id~"' not found");
 	if (v.v is null)
 		throw new SemanticError("Symbol `"~v.id~"' is not a variable");
+	v.type = v.v.type;
 }
 
 void semanticImpl(Block b, Scope s) {
@@ -98,16 +103,55 @@ void semanticImpl(Fun f, Scope s) {
 	f.body.semantic(f.s);
 }
 
+private bool isBool(Type t) {
+	auto bt = cast(BaseType)t;
+	if (bt !is null && typeid(bt.decl) == typeid(BoolTypeDecl))
+		return true;
+	auto rt = cast(RefType)t;
+	if (rt !is null && typeid((cast(BaseType)rt.base).decl) == typeid(BoolTypeDecl))
+		return true;
+	return false;
+}
+
 void semanticImpl(If i, Scope s) {
 	i.cond.semantic(s);
 	i.t.semantic(s);
 	if (i.f !is null)
 		i.f.semantic(s);
+
+
+	if (!i.cond.type.isBool)
+		throw new SemanticError("If condition is not of type bool");
 }
 
 void semanticImpl(While w, Scope s) {
 	w.cond.semantic(s);
 	w.body.semantic(s);
+
+	if (!w.cond.type.isBool)
+		throw new SemanticError("While condition is not of type bool");
+}
+
+void semanticImpl(Loop l, Scope s) {
+	l.body.semantic(s);
+	if (l.cond !is null) {
+		l.cond.semantic(s);
+
+		if (!l.cond.type.isBool)
+			throw new SemanticError("Loop condition is not of type bool");
+	}
+}
+
+void semanticImpl(Assign a, Scope s) {
+	a.lhs.semantic(s);
+	a.rhs.semantic(s);
+
+	if (a.lhs.type.is_auto) {
+		auto v = cast(VarRef)a.lhs;
+		assert(v !is null);
+		v.v.type = a.rhs.type;
+		v.type = v.v.type;
+	}
 }
 
 void semanticImpl(Call c, Scope s) {
@@ -116,6 +160,12 @@ void semanticImpl(Call c, Scope s) {
 		e.semantic(s);
 }
 
-void semanticImpl(Number n, Scope s) { }
+void semanticImpl(Number n, Scope s) {
+	n.type = new BaseType(new NumTypeDecl);
+}
+
+void semanticImpl(Boolean b, Scope s) {
+	b.type = new BaseType(new BoolTypeDecl);
+}
 
 alias semantic = multiDispatch!semanticImpl;

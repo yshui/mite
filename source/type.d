@@ -66,9 +66,9 @@ final class UnionTypeDecl: TypeDecl {
 }
 TypeDecl[] builtin_types() {
 	return [
-		new TypeDecl("num"),
-		new TypeDecl("bool"),
-		new TypeDecl("string"),
+		new NumTypeDecl(),
+		new BoolTypeDecl(),
+		new StringTypeDecl(),
 	];
 }
 
@@ -81,17 +81,11 @@ class TypeDecl: Symbol {
 	}
 }
 
-class Type {
-	Type base;
-	@property bool is_auto() { return base.is_auto; }
-	@property bool has_storage() { return base.has_storage; }
-	pure this(Type type) {
-		base = type;
-	}
-	override string toString() const {
-		return base.toString;
-	}
-}
+class NumTypeDecl: TypeDecl { this() { super("num"); } }
+
+class BoolTypeDecl: TypeDecl { this() { super("bool"); } }
+
+class StringTypeDecl: TypeDecl { this() { super("string"); } }
 
 final class BaseType : Type {
 	TypeDecl decl;
@@ -105,6 +99,11 @@ final class BaseType : Type {
 	pure this(string name) {
 		super(null);
 		decl_name = name;
+	}
+	pure this(TypeDecl td) {
+		super(null);
+		decl = td;
+		decl_name = [];
 	}
 	override string toString() const {
 		if (decl !is null)
