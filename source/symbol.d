@@ -36,39 +36,3 @@ class Scope {
 		parent = p;
 	}
 }
-
-class Type: Symbol {
-	this(string t) {
-		super(t);
-	}
-	override string toString() const {
-		return id;
-	}
-}
-
-class Member {
-	string id, type_name;
-	Type type;
-}
-class StructType: Type {
-	Member[] m;
-	this(string t, Member[] _m) {
-		m = _m;
-		super(t);
-	}
-}
-class UnionType: Type {
-	Type[] m;
-	this(string t, Type[] _m) {
-		m = _m;
-		super(t);
-	}
-}
-
-Type[] builtin_types() {
-	return [
-		new Type("num"),
-		new Type("bool"),
-		new Type("string"),
-	];
-}

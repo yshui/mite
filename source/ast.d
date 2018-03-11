@@ -2,12 +2,7 @@ module ast;
 import sdpc;
 import type;
 import symbol;
-
-class AstNode {
-	override string toString() const {
-		return "astnode";
-	}
-}
+import common;
 
 class Fun: Variable {
 	bool async;
@@ -15,7 +10,7 @@ class Fun: Variable {
 	Variable[] params;
 	Scope s;
 	Span span;
-	pure this(bool a, string n, Variable[] p, TypeRef t, Block b, Span x) {
+	pure this(bool a, string n, Variable[] p, Type t, Block b, Span x) {
 		super(t, n);
 		body = b;
 		params = p;
@@ -34,9 +29,9 @@ class Fun: Variable {
 	}
 }
 
-class Expr: AstNode {  }
+class Lvalue: Expr {  }
 
-class VarRef: Expr {
+class VarRef: Lvalue {
 	string id;
 	Variable v;
 	pure this(string x) { id = x; }
@@ -48,9 +43,9 @@ class VarRef: Expr {
 }
 
 class Call: Expr {
-	VarRef func;
+	Expr func;
 	Expr[] args;
-	pure this(VarRef v, Expr[] exprs) {
+	pure this(Expr v, Expr[] exprs) {
 		func = v;
 		args = exprs;
 	}
@@ -59,7 +54,7 @@ class Call: Expr {
 		import std.string : join;
 		import std.array : array;
 		import std.conv : to;
-		return func.id~"("~args.map!"a.toString".join(", ").array.to!string~")";
+		return func.toString~"("~args.map!"a.toString".join(", ").array.to!string~")";
 	}
 }
 
@@ -100,7 +95,7 @@ class Stmt: AstNode { }
 class Decl: Stmt {
 	Variable v;
 	Expr i;
-	pure this(TypeRef tr, string id, Expr i_) {
+	pure this(Type tr, string id, Expr i_) {
 		v = new Variable(tr, id);
 		i = i_;
 	}
@@ -145,28 +140,21 @@ class If: Stmt {
 	}
 }
 
-class TypeRef {
-	bool isref;
-	bool ro;
-	string base_type_name;
-	Type base_type;
-	Expr[] dimensions;
-	pure this(string bty, Expr[] di, bool isref_=false, bool ro_=false) {
-		base_type_name = bty;
-		dimensions = di;
-		isref = isref_;
-		ro = ro_;
+class While: Stmt {
+	Block body;
+	Expr cond;
+	pure this(Expr c, Block b) {
+		cond = c;
+		body = b;
 	}
 	override string toString() const {
-		import std.algorithm, std.array;
-		string ty = base_type is null ? base_type_name : "<"~base_type.toString~">";
-		return (ro ? "ro" : "")~(isref ? "&" : "")~ty~dimensions.map!q{"["~a.toString~"]"}.join("");
+		return "while "~cond.toString~" "~body.toString;
 	}
 }
 
 class Variable: Symbol {
-	TypeRef type;
-	pure this(TypeRef tr, string i) {
+	Type type;
+	pure this(Type tr, string i) {
 		super(i);
 		type = tr;
 	}

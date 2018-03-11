@@ -2,38 +2,64 @@ module parser;
 import ast;
 import sdpc;
 import common;
+import symbol;
+import type : Type, BaseType, RefType, ArrayType, DynamicArrayType;
 import std.functional, std.array, std.conv;
 
+alias Result(T) = sdpc.Result!(I, T, Err!I);
+
 auto make_param(R)(R i) {
-	bool isr = !i.v!0.isNull, ro = !i.v!1.isNull;
-	auto ty = i.v!2;
-	ty.isref = isr;
-	ty.ro = ro;
-	return new Variable(ty, i.v!3.to!string);
+	return new Variable(i.v!0, i.v!1.to!string);
 }
 
 auto make_func(R)(R i, in ref Span span) {
-	return new Fun(i.v!0 == "afn", i.v!1.to!string, i.v!2, new TypeRef(i.v!4.to!string, []), i.v!5, span);
+	return new Fun(i.v!0 == "afn", i.v!1.to!string, i.v!2, i.v!4, i.v!5, span);
 }
 
 auto param(I i) {
 	return
 	i.pipe!(seq!(
-	             ws!(optional!(token!"ro")),
-	             optional!(token!"&"),
 	             type,
 	             ws!identifier,
 	), wrap!make_param);
 }
 
-auto make_typeref_bare(dchar[] ty) {
-	return new TypeRef(ty.to!string, []);
+Type make_basetype(dchar[] ty) {
+	return new BaseType(ty.to!string);
 }
 
-auto type(I i) {
+Type make_reftype(R)(R i) {
+	return new RefType(!i.v!0.isNull, i.v!2);
+}
+
+// What does array type do?
+// When passed as value argument, array is copied, even for dynamic arrays
+// e.g. pass num[3][4] to num[][3], all elements are copied,
+// when passed as ref argument, then a reference is passed even for static sized array
+Type make_type(R)(R i) {
+	auto ret = i.v!1;
+	if (i.v!2.length > 0)
+		ret = new ArrayType(ret, i.v!2);
+	if (!i.v!0.isNull)
+		ret = new DynamicArrayType(ret);
+	return ret;
+}
+
+Result!Type type_no_array(I i) {
 	return
 	i.choice!(
-	          pipe!(ws!identifier, wrap!make_typeref_bare)
+	          pipe!(seq!(optional!(token!"ro"), token!"&", type), wrap!make_reftype),
+	          pipe!(ws!identifier, wrap!make_basetype),
+	);
+}
+
+Result!Type type(I i) {
+	return
+	i.pipe!(seq!(
+	             optional!(token_ws!"[]"),
+	             type_no_array, many!(between!(token_ws!"[", expression, token_ws!"]"), true)
+	        ),
+	        wrap!make_type
 	);
 }
 
@@ -61,6 +87,14 @@ Stmt make_if(R)(R i) {
 	return new If(i.v!1, i.v!2, i.v!3.isNull ? null : i.v!3.v!1);
 }
 
+Stmt make_while(R)(R i) {
+	return new While(i.v!3, i.v!4);
+}
+
+Stmt make_loop(R)(R i) {
+	return null;
+}
+
 auto declaration(I i) {
 	return
 	i.pipe!(seq!(
@@ -77,7 +111,8 @@ auto statement(I i) {
 	        expression_statement,
 	        block_stmt,
 	        declaration,
-	        if_statement
+	        if_statement,
+	        while_statement
 	));
 }
 
@@ -87,7 +122,7 @@ Block make_block(Stmt[] i) {
 	return new Block(i);
 }
 
-Result!(I, Block, Err!I) block(I i) {
+Result!Block block(I i) {
 	return i.pipe!(between!(token_ws!"{", statement_list, token_ws!"}"), wrap!make_block);
 }
 
@@ -100,7 +135,7 @@ auto func(I i) {
 	       ws!identifier,
 	       ws!(between!(ws!(token!"("), ws!param_list, ws!(token!")"))),
 	       ws!(token!"->"),
-	       ws!identifier,
+	       type,
 	       block
 	)), wrap!make_func);
 }
@@ -113,6 +148,30 @@ auto if_statement(I i) {
 	             block,
 	             optional!(seq!(token_ws!"else", block)),
 	), wrap!make_if);
+}
+
+alias block_tag = between!(token_ws!"[", ws!identifier, token_ws!"]");
+
+auto while_statement(I i) {
+	return
+	i.pipe!(seq!(
+	             token!"while",
+	             optional!block_tag,
+	             skip!whitespace,
+	             expression,
+	             block
+	), wrap!make_while);
+}
+
+auto loop_statment(I i) {
+	return
+	i.pipe!(seq!(
+	             token!"loop",
+	             optional!block_tag,
+	             skip!whitespace,
+	             block,
+	             optional!(seq!(token_ws!"until", expression))
+	), wrap!make_loop);
 }
 
 auto make_atom_uop(R)(R i) {
@@ -131,8 +190,12 @@ auto make_bop(R)(R[] i) {
 	return i[2..$].fold!((a, b) => new Bop(a, b.v!1, b.v!0))(e);
 }
 
-Expr make_call(R)(R i) {
-	return new Call(new VarRef(i.v!0.to!string), i.v!1);
+Expr make_atom(R)(R i) {
+	Expr ret = i.v!0;
+	foreach(es; i.v!1) {
+		ret = new Call(ret, es);
+	}
+	return ret;
 }
 
 auto expression_list(R)(R i) {
@@ -144,14 +207,27 @@ auto expression_list(R)(R i) {
 	}));
 }
 
+auto make_varref(R)(R i) {
+	return new VarRef(i.to!string);
+}
+
+auto lvalue(R)(R i) {
+	return i.ws!(choice!(pipe!(identifier, wrap!make_varref)));
+}
+
+alias lvalue_expr = pipe!(lvalue, wrap!((a) => cast(Expr)a));
+
 private alias prefix_op = ws!(choice!(token!"!", token!"~", token!"-", token!"+"));
-private alias atom =
+private alias atom0 = ws!(choice!(lvalue_expr));
+private alias atom_no_call =
 ws!(choice!(
-            pipe!(seq!(ws!identifier, between!(token_ws!"(", expression_list, token!")")), wrap!make_call),
-            pipe!(seq!(many!(prefix_op, true), identifier), wrap!make_atom_uop),
+            pipe!(seq!(many!(prefix_op, true), atom0), wrap!make_atom_uop),
             pipe!(number, wrap!((a) => cast(Expr)new Number(a))),
-            between!(token_ws!"(", expression, token!")")
+            between!(token_ws!"(", expression, token!")"),
+            atom0,
 ));
+
+private alias atom = pipe!(seq!(atom_no_call, many!(between!(token_ws!"(", expression_list, token_ws!")"), true)), wrap!make_atom);
 
 private alias op_pre1 = ws!(choice!(token!"*", token!"/"));
 private alias term1 = pipe!(chain!(atom, op_pre1), wrap!make_bop);
@@ -160,6 +236,6 @@ private alias term2 = pipe!(chain!(term1, op_pre2), wrap!make_bop);
 private alias op_pre3 = ws!(choice!(token!"||", token!"&&"));
 private alias term3 = pipe!(chain!(term2, op_pre3), wrap!make_bop);
 
-Result!(I, Expr, Err!I) expression(InputType i) {
+Result!Expr expression(InputType i) {
 	return term3(i);
 }
