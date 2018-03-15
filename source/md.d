@@ -127,6 +127,7 @@ template multiDispatch(alias func) {
 			import std.string : join;
 			import std.array : array;
 			import std.conv : to;
+			import std.range : iota;
 			alias cand =
 			    filterOverloads!(isCompatible, _types!T, overloads);
 			static assert(cand.length != 0, "No suitable overload found for argument type: "~T.stringof~
@@ -156,8 +157,12 @@ template multiDispatch(alias func) {
 
 				mixin(genCall!(p, T));
 			}
+
+			string[T.length] typename;
+			static foreach(i; 0..T.length)
+				typename[i] = ti[i] is null ? T[i].stringof : ti[i].toString;
 			throw new OverloadNotFoundException("no suitable overload of function `"~fullyQualifiedName!func~"', "~
-			       "argument types: "~ti[].map!((a) => a.toString).join(", ").array.to!string);
+			       "argument types: "~typename[].join(", ").to!string);
 		}
 	}
 }

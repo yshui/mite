@@ -27,4 +27,5 @@ void main(string[] args) {
 	writeln(p.v);
 
 	auto ir = buildIR(fun);
+	writeln(ir);
 }

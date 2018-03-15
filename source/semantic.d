@@ -184,7 +184,15 @@ void semanticImpl(Continue c, Scope s) {
 			return false;
 		return true;
 	}
-	c.target = s.find_parent(&match);
+	auto ps = s.find_parent(&match);
+	auto l = cast(Loop)ps.b;
+	if (l !is null)
+		c.target = l.body.s;
+	else {
+		auto w = cast(While)ps.b;
+		assert(w !is null);
+		c.target = w.body.s;
+	}
 	if (c.target is null)
 		throw new SemanticError("continue statements is not in a loop/while statement"~(c.tag ? " named "~c.tag : ""));
 	if (c.r !is null)

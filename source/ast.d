@@ -63,7 +63,9 @@ final class Call: Expr {
 	}
 }
 
-final class Number: Expr {
+class Constant: Expr {}
+
+final class Number: Constant {
 	double n;
 	pure this(int i) { n = i; }
 	pure this(double d) { n = d; }
@@ -73,7 +75,7 @@ final class Number: Expr {
 	}
 }
 
-final class Boolean: Expr {
+final class Boolean: Constant {
 	bool t;
 	pure this(bool b) { t = b; }
 	override string toString() const {
@@ -81,7 +83,7 @@ final class Boolean: Expr {
 	}
 }
 
-final class String: Expr {
+final class String: Constant {
 	string str;
 	pure this(string s) { str = s; }
 	override string toString() const {
