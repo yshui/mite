@@ -3,14 +3,18 @@ import sdpc;
 import type;
 import symbol;
 import common;
+import std.format : format;
 
-class Fun: Variable {
+final class Fun: VarDecl, Scoped {
 	bool async;
 	Block body;
-	Variable[] params;
-	Scope s;
+	VarDecl[] params;
+	Scope _s;
 	Span span;
-	pure this(bool a, string n, Variable[] p, Type t, Block b, Span x) {
+	override @property void s(Scope s) { _s = s; }
+	override @property inout(Scope) s() inout { return _s; }
+	override @property string tag() const { return ""; }
+	pure this(bool a, string n, VarDecl[] p, Type t, Block b, Span x) {
 		super(t, n);
 		body = b;
 		params = p;
@@ -20,10 +24,9 @@ class Fun: Variable {
 	override string toString() const {
 		import std.array;
 		import std.algorithm : map;
-		import std.format;
 		string ret = "%s, %s to %s, %s\n".format(span.begin_row, span.begin_col, span.end_row, span.end_col);
 		ret ~= async ? "afn": "fn";
-		ret ~= " "~id~"("~params.map!"a.toString()".join(",")~") -> "~type.toString~" ";
+		ret ~= " %s (%s) -> %s ".format(id, params.map!"a.toString()".join(","), type);
 		ret ~= body.toString;
 		return ret;
 	}
@@ -31,18 +34,18 @@ class Fun: Variable {
 
 class Lvalue: Expr {  }
 
-class VarRef: Lvalue {
+final class VarRef: Lvalue {
 	string id;
-	Variable v;
+	VarDecl v;
 	pure this(string x) { id = x; }
 	override string toString() const {
 		if (v is null)
 			return id;
-		return id~"<"~v.type.toString~">";
+		return "%s<%s>".format(id, v.type);
 	}
 }
 
-class Call: Expr {
+final class Call: Expr {
 	Lvalue func;
 	Expr[] args;
 	bool await;
@@ -60,7 +63,7 @@ class Call: Expr {
 	}
 }
 
-class Number: Expr {
+final class Number: Expr {
 	double n;
 	pure this(int i) { n = i; }
 	pure this(double d) { n = d; }
@@ -70,7 +73,7 @@ class Number: Expr {
 	}
 }
 
-class Boolean: Expr {
+final class Boolean: Expr {
 	bool t;
 	pure this(bool b) { t = b; }
 	override string toString() const {
@@ -78,7 +81,15 @@ class Boolean: Expr {
 	}
 }
 
-class Uop: Expr {
+final class String: Expr {
+	string str;
+	pure this(string s) { str = s; }
+	override string toString() const {
+		return "\""~str~"\"";
+	}
+}
+
+final class Uop: Expr {
 	string op;
 	Expr e;
 	pure this(string o, Expr _e) { op = o; e = _e; }
@@ -87,7 +98,7 @@ class Uop: Expr {
 	}
 }
 
-class Bop: Expr {
+final class Bop: Expr {
 	string op;
 	Expr lhs, rhs;
 	pure this(Expr lhs_, string o, Expr rhs_) {
@@ -100,12 +111,11 @@ class Bop: Expr {
 	}
 }
 
-class Stmt: AstNode { }
-class Decl: Stmt {
-	Variable v;
+final class VarDeclStmt: Stmt {
+	VarDecl v;
 	Expr i;
 	pure this(Type tr, string id, Expr i_) {
-		v = new Variable(tr, id);
+		v = new VarDecl(tr, id);
 		i = i_;
 	}
 	override string toString() const {
@@ -113,7 +123,7 @@ class Decl: Stmt {
 	}
 }
 
-class ExprStmt: Stmt {
+final class ExprStmt: Stmt {
 	Expr e;
 	pure this(Expr e_) { e = e_; }
 	override string toString() const {
@@ -121,19 +131,33 @@ class ExprStmt: Stmt {
 	}
 }
 
-class Block: Stmt {
+class ScopedStmt: Stmt, Scoped {
+	private Scope _s;
+	private string _tag;
+
+	pure this(string tag) {
+		_tag = tag;
+	}
+
+	override @property void s(Scope s) { _s = s; }
+	override @property inout(Scope) s() inout { return _s; }
+	override @property string tag() const { return _tag; }
+}
+
+final class Block: ScopedStmt {
 	Stmt[] statements;
 	pure this(Stmt[] s) {
 		statements = s;
+		super("");
 	}
 	override string toString() const {
 		import std.algorithm : map;
 		import std.array : join;
-		return "{\n"~statements.map!"a.toString()".join("\n")~"\n}";
+		return "["~tag~"] {\n"~statements.map!"a.toString()".join("\n")~"\n}";
 	}
 }
 
-class If: Stmt {
+final class If: Stmt {
 	Block t, f;
 	Expr cond;
 	pure this(Expr c, Block t_, Block f_=null) {
@@ -149,10 +173,11 @@ class If: Stmt {
 	}
 }
 
-class While: Stmt {
+final class While: ScopedStmt {
 	Block body;
 	Expr cond;
-	pure this(Expr c, Block b) {
+	pure this(Expr c, Block b, string tag) {
+		super(tag);
 		cond = c;
 		body = b;
 	}
@@ -161,19 +186,22 @@ class While: Stmt {
 	}
 }
 
-class Loop: Stmt {
+final class Loop: ScopedStmt {
 	Block body;
 	Expr cond;
-	pure this(Block b, Expr e) {
+	pure this(Block b, Expr e, string tag) {
+		super(tag);
 		cond = e;
 		body = b;
 	}
 	override string toString() const {
-		return "loop "~body.toString~(cond is null ? "" : "until "~cond.toString~" ;");
+		import std.format;
+		return "loop [%s] %s".format(tag, body)~
+		    (cond is null ? "" : "until %s ;".format(cond));
 	}
 }
 
-class Assign: Stmt {
+final class Assign: Stmt {
 	Lvalue lhs;
 	Expr rhs;
 	pure this(Lvalue lv, Expr e) {
@@ -185,7 +213,44 @@ class Assign: Stmt {
 	}
 }
 
-class Variable: Symbol {
+final class Continue: Stmt {
+	string tag;
+	Expr r; //XXX
+	Scope target;
+	pure this(string t, Expr e) {
+		tag = t;
+		r = e;
+	}
+	override string toString() const {
+		return "continue"~"["~tag~"] "~(r is null ? "" : r.toString)~";";
+	}
+}
+
+final class Break: Stmt {
+	string tag;
+	Expr r;
+	Scope target;
+	pure this(string t, Expr e) {
+		tag = t;
+		r = e;
+	}
+	override string toString() const {
+		return "break"~"["~tag~"] "~(r is null ? "" : r.toString)~";";
+	}
+}
+
+final class Return: Stmt {
+	Expr r;
+	Scope target;
+	pure this(Expr e) {
+		r = e;
+	}
+	override string toString() const {
+		return "return "~r.toString~";";
+	}
+}
+
+class VarDecl: Symbol {
 	Type type;
 	pure this(Type tr, string i) {
 		super(i);

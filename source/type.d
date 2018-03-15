@@ -10,6 +10,7 @@ final class Member {
 final class RefType: Type {
 	bool ro;
 	pure this(bool ro_, Type type) {
+		assert(type !is null);
 		super(type);
 		ro = ro_;
 	}
@@ -17,6 +18,7 @@ final class RefType: Type {
 	override string toString() const {
 		return (ro ? "ro" : "")~"&"~base.toString;
 	}
+	invariant { assert(base !is null); }
 }
 
 final class ArrayType: Type {

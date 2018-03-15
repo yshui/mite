@@ -5,11 +5,19 @@ import common;
 import symbol;
 import type : BaseType, RefType, ArrayType, DynamicArrayType;
 import std.functional, std.array, std.conv;
+import std.typecons : Nullable;
 
 alias Result(T) = sdpc.Result!(I, T, Err!I);
 
+private auto map_or(alias func = "a", T, R = typeof(func(T.init)))(auto ref Nullable!T i, auto ref R o) {
+	if (i.isNull)
+		return o;
+	alias uf = unaryFun!func;
+	return uf(i.get);
+}
+
 auto make_param(R)(R i) {
-	return new Variable(i.v!0, i.v!1.to!string);
+	return new VarDecl(i.v!0, i.v!1.to!string);
 }
 
 auto make_func(R)(R i, in ref Span span) {
@@ -76,7 +84,7 @@ auto expression_statement(I i) {
 
 Stmt make_decl(R)(R i) {
 	return
-	new Decl(
+	new VarDeclStmt(
 	         i.v!0,
 	         i.v!1.to!string,
 	         i.v!2.isNull ? null : i.v!2
@@ -84,15 +92,28 @@ Stmt make_decl(R)(R i) {
 }
 
 Stmt make_if(R)(R i) {
-	return new If(i.v!1, i.v!2, i.v!3.isNull ? null : i.v!3.v!1);
+	return new If(i.v!1, i.v!2, i.v!3.map_or!"a.v!1"(null));
 }
 
 Stmt make_while(R)(R i) {
-	return new While(i.v!3, i.v!4);
+	return new While(i.v!3, i.v!4, i.v!1.map_or!(to!string)(""));
 }
 
 Stmt make_loop(R)(R i) {
-	return new Loop(i.v!3, i.v!4.isNull ? null : i.v!4);
+	return new Loop(i.v!3, i.v!4.map_or(null), i.v!1.map_or!(to!string)(""));
+}
+
+Stmt make_cf(R)(R i) {
+	final switch(i.v!0) {
+	case "continue":
+		return new Continue(i.v!1.map_or!(to!string)(""), i.v!3.map_or(null));
+	case "break":
+		return new Break(i.v!1.map_or!(to!string)(""), i.v!3.map_or(null));
+	}
+}
+
+Stmt make_ret(R)(R i) {
+	return new Return(i.v!1);
 }
 
 Stmt make_assign(R)(R i) {
@@ -109,16 +130,32 @@ auto declaration(I i) {
 	), wrap!make_decl);
 }
 
+auto control_flow(I i) {
+	return
+	i.pipe!(seq!(
+	             choice!(token!"continue", token!"break"),
+	             optional!block_tag, skip!whitespace, optional!expression,
+	             token_ws!";"
+	), wrap!make_cf);
+}
+
+auto return_(I i) {
+	return
+	i.pipe!(seq!(token_ws!"return", optional!expression, token_ws!";"), wrap!make_ret);
+}
+
 auto statement(I i) {
 	return
 	i.ws!(choice!(
-	        expression_statement,
-	        assign_statement,
-	        block_statement,
-	        declaration,
-	        if_statement,
-	        while_statement,
-	        loop_statment
+	              control_flow,
+	              return_,
+	              expression_statement,
+	              assign_statement,
+	              block_statement,
+	              declaration,
+	              if_statement,
+	              while_statement,
+	              loop_statment
 	));
 }
 
@@ -226,6 +263,7 @@ ws!(choice!(
             pipe!(seq!(optional!(token_ws!"$"), lvalue, between!(token_ws!"(", expression_list, token_ws!")")), wrap!make_call),
             pipe!(seq!(many!(prefix_op, true), lvalue), wrap!make_atom_uop),
             pipe!(number, wrap!((a) => cast(Expr)new Number(a))),
+            pipe!(parse_string, wrap!((a) => cast(Expr)new String(a.to!string))),
             between!(token_ws!"(", expression, token!")"),
             lvalue_expr,
 ));

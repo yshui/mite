@@ -14,6 +14,8 @@ class Expr : AstNode {
 	Type type = null;
 }
 
+class Stmt: AstNode { }
+
 class Type {
 	Type base;
 	@property bool is_auto() { return base.is_auto; }

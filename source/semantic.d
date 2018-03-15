@@ -5,6 +5,7 @@ import ast;
 import md;
 import type;
 import resolver;
+debug import std.stdio;
 
 void semanticImpl(BaseType ty, Scope s) {
 	if (ty.is_auto) {
@@ -37,7 +38,7 @@ void semanticImpl(DynamicArrayType ty, Scope s) {
 	ty.base.semantic(s);
 }
 
-void semanticImpl(Variable v, Scope s) {
+void semanticImpl(VarDecl v, Scope s) {
 	v.type.semantic(s);
 }
 
@@ -61,7 +62,7 @@ void semanticImpl(Uop e, Scope s) {
 	e.type = uopResolver(e.op, e.e.type);
 }
 
-void semanticImpl(Decl d, Scope s) {
+void semanticImpl(VarDeclStmt d, Scope s) {
 	auto sym = s.find_local(d.v.id);
 	if (sym !is null)
 		throw new SemanticError("Symbol `"~d.v.id~"' is already defined in the scope");
@@ -79,7 +80,7 @@ void semanticImpl(ExprStmt es, Scope s) {
 
 void semanticImpl(VarRef v, Scope s) {
 	auto sym = s.find(v.id);
-	v.v = cast(Variable)sym;
+	v.v = cast(VarDecl)sym;
 	if (sym is null)
 		throw new SemanticError("Symbol `"~v.id~"' not found");
 	if (v.v is null)
@@ -88,12 +89,13 @@ void semanticImpl(VarRef v, Scope s) {
 }
 
 void semanticImpl(Block b, Scope s) {
+	b.s = new Scope(Span.init, s, cast(Scoped)b);
 	foreach(a; b.statements)
-		a.semantic(s);
+		a.semantic(b.s);
 }
 
 void semanticImpl(Fun f, Scope s) {
-	f.s = new Scope(Span.init, s);
+	f.s = new Scope(Span.init, s, null);
 	foreach(p; f.params) {
 		p.semantic(s);
 		f.s.add(p);
@@ -115,10 +117,10 @@ private bool isBool(Type t) {
 
 void semanticImpl(If i, Scope s) {
 	i.cond.semantic(s);
+
 	i.t.semantic(s);
 	if (i.f !is null)
 		i.f.semantic(s);
-
 
 	if (!i.cond.type.isBool)
 		throw new SemanticError("If condition is not of type bool");
@@ -126,20 +128,67 @@ void semanticImpl(If i, Scope s) {
 
 void semanticImpl(While w, Scope s) {
 	w.cond.semantic(s);
-	w.body.semantic(s);
+	w.s = new Scope(Span.init, s, cast(Scoped)w);
+	w.body.semantic(w.s);
 
 	if (!w.cond.type.isBool)
 		throw new SemanticError("While condition is not of type bool");
 }
 
 void semanticImpl(Loop l, Scope s) {
-	l.body.semantic(s);
+	l.s = new Scope(Span.init, s, cast(Scoped)l);
+	l.body.semantic(l.s);
 	if (l.cond !is null) {
 		l.cond.semantic(s);
 
 		if (!l.cond.type.isBool)
 			throw new SemanticError("Loop condition is not of type bool");
 	}
+}
+
+void semanticImpl(Return r, Scope s) {
+	r.target = s.find_parent((a) => a.b !is null && cast(Fun)a.b !is null);
+	assert(r.target !is null);
+	if (r.r !is null)
+		r.r.semantic(s);
+}
+
+void semanticImpl(Break b, Scope s) {
+	bool match(Scope s) {
+		if (s.b is null)
+			return false;
+		// break can be used to break any scope with a matching tag
+		if (b.tag != "" && s.tag == b.tag)
+			return true;
+		// Or break out of the nearest loop/while
+		if (b.tag == "" && (cast(Loop)s.b !is null || cast(While)s.b !is null))
+			return true;
+		return false;
+	}
+	b.target = s.find_parent(&match);
+	if (b.target is null)
+		throw new SemanticError("break statements is not in a loop/while statement"~(b.tag ? " named "~b.tag : ""));
+	if (b.r !is null)
+		b.r.semantic(s);
+}
+
+void semanticImpl(Continue c, Scope s) {
+	bool match(Scope s) {
+		if (s.b is null)
+			return false;
+		// continue only works inside loop/while
+		if (cast(Loop)s.b is null && cast(While)s.b is null)
+			return false;
+		// if tag is explicit, match tag
+		if (c.tag != "" && s.tag != c.tag)
+			return false;
+		return true;
+	}
+	c.target = s.find_parent(&match);
+	if (c.target is null)
+		throw new SemanticError("continue statements is not in a loop/while statement"~(c.tag ? " named "~c.tag : ""));
+	if (c.r !is null)
+		c.r.semantic(s);
 }
 
 void semanticImpl(Assign a, Scope s) {
@@ -166,6 +215,10 @@ void semanticImpl(Number n, Scope s) {
 
 void semanticImpl(Boolean b, Scope s) {
 	b.type = new BaseType(new BoolTypeDecl);
+}
+
+void semanticImpl(String str, Scope s) {
+	str.type = new BaseType(new StringTypeDecl);
 }
 
 alias semantic = multiDispatch!semanticImpl;

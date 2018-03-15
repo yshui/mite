@@ -1,6 +1,7 @@
 import std.stdio, std.file;
 import parser;
 import ast;
+import ir;
 import type;
 import semantic : semantic;
 import symbol;
@@ -17,11 +18,13 @@ void main(string[] args) {
 		return;
 	}
 	auto fun = p.v;
-	auto global = new Scope(Span.init, null);
+	auto global = new Scope(Span.init, null, null);
 	foreach(t; builtin_types())
 		global.add(t);
 
 	writeln(p.v);
 	semantic(fun, global);
 	writeln(p.v);
+
+	auto ir = buildIR(fun);
 }
