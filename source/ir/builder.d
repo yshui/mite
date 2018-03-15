@@ -1,4 +1,4 @@
-module ir;
+module ir.builder;
 import common;
 import symbol;
 import ast;
@@ -7,12 +7,17 @@ import type;
 
 import std.typecons : tuple;
 import std.format : format;
-import std.array : popBack;
+import std.array : popBack, back;
+debug import std.stdio;
 
 class Inst {
 	override string toString() const {
 		return "inst";
 	}
+	pure this(Var* v) {
+		v.assign = this;
+	}
+	pure this() {}
 }
 
 final class ICall: Inst {
@@ -22,6 +27,7 @@ final class ICall: Inst {
 	pure this(Var* func, Var*[] p, Var* r) {
 		param = p;
 		res = r;
+		super(res);
 	}
 }
 
@@ -47,9 +53,31 @@ final class IBop: Inst {
 		rhs = v2;
 		res = v3;
 		op = op_;
+		super(res);
 	}
 	override string toString() const {
 		return "%s = bop[%s] %s, %s".format(*res, op, *lhs, *rhs);
+	}
+}
+
+final class Phi: Inst {
+	Var*[BB*] src;
+	Var* res;
+	override string toString() const {
+		import std.string : join;
+		import std.algorithm : map;
+		return "%s = %s".format(
+			*res,
+			src.byKeyValue.map!((a) => "%s: %s".format(a.key.name, *a.value)).join(", ")
+		);
+	}
+	pure this(BB*[] bb, Var*[] v, Var* r) {
+		import std.range : zip;
+		assert(bb.length == v.length);
+		foreach(i, x; zip(bb, v))
+			src[i] = x;
+		res = r;
+		super(res);
 	}
 }
 
@@ -66,6 +94,7 @@ final class IUop: Inst {
 		v = v1;
 		res = v2;
 		op = op_;
+		super(res);
 	}
 	override string toString() const {
 		return "%s = uop[%s] %s".format(*res, op, *v);
@@ -88,6 +117,7 @@ final class Load: Inst {
 	pure this(Var* v1, Var* v2) {
 		addr = v1;
 		val = v2;
+		super(val);
 	}
 	override string toString() const {
 		return "%s = load %s".format(*val, *addr);
@@ -100,6 +130,7 @@ final class Imm: Inst {
 	pure this(Var* v, Constant x) {
 		c = x;
 		tgt = v;
+		super(tgt);
 	}
 	override string toString() const {
 		return "%s = imm %s".format(*tgt, c);
@@ -108,6 +139,9 @@ final class Imm: Inst {
 
 final class Ret: Inst {
 	Var* v;
+	pure this(Var *v_) {
+		v = v_;
+	}
 }
 
 final class AddrOf: Inst {
@@ -116,6 +150,7 @@ final class AddrOf: Inst {
 	pure this(VarRef v_, Var* res_) {
 		v = v_;
 		res = res_;
+		super(res);
 	}
 	override string toString() const {
 		return "%s = addr %s".format(*res, v);
@@ -128,6 +163,7 @@ final class RefAddrOf: Inst {
 	pure this(VarRef v_, Var* res_) {
 		v = v_;
 		res = res_;
+		super(res);
 	}
 	override string toString() const {
 		return "%s = refaddr %s".format(*res, v);
@@ -138,13 +174,20 @@ struct Var {
 	import std.conv;
 	string name;
 	Type type;
+	static ulong vcount = 0;
+	private Inst assign_;
+	@property pure Inst assign() { return assign_; };
+	@property pure void assign(Inst i) in { assert(assign_ is null); }
+	body {
+		assign_ = i;
+	}
 	string toString() const {
 		import std.format : formatValue;
 		return name;
 	}
-	pure this(string n) {
+	this(string n) {
 		if (n == "")
-			name = (&this).to!string;
+			name = "v%s".format(vcount++);//(&this).to!string;
 		else
 			name = n;
 	}
@@ -165,14 +208,15 @@ struct BB {
 		import std.algorithm : map;
 		import std.string : join;
 		return "[%s]{\n%s\n} (%s,%s,%s)".format(name,
-				inst.map!((a) => a.toString).join(";\n"), cond,
+				inst.map!((a) => a.toString).join(";\n"),
+				cond ? cond.toString : "<true>",
 				succ.length > 0 ? succ[0].name : null,
 				succ.length > 1 ? succ[1].name : null);
 	}
 }
 
 struct CFG {
-	BB[] bb;
+	BB*[] bb;
 	string toString() const {
 		import std.algorithm : map;
 		import std.string : join;
@@ -197,8 +241,8 @@ private struct Context {
 
 	BB* new_bb() {
 		import std.conv : to;
-		cfg.bb ~= BB(cfg.bb.length.to!string);
-		return &cfg.bb[$-1];
+		cfg.bb ~= new BB(cfg.bb.length.to!string);
+		return cfg.bb.back;
 	}
 
 	BB* new_bb_curr() {
@@ -212,6 +256,7 @@ private struct Context {
 				return e[1];
 		return null;
 	}
+	@disable this(this);
 }
 
 Var* buildIRForRefImpl(VarRef v, BaseType t, ref Context ctx) {
@@ -260,7 +305,24 @@ Var* buildIRImpl(Bop b, ref Context ctx) {
 	auto ret = new Var("");
 	auto op = opt[b.op];
 	if (op == IBop.Op.And || op == IBop.Op.Or) {
-		// short circuit not implemented
+		auto v1 = b.lhs.buildIR(ctx);
+		auto lhs_end_bb = ctx.curr;
+		lhs_end_bb.cond = v1;
+		auto rhs_bb = ctx.new_bb_curr;
+		auto v2 = b.rhs.buildIR(ctx);
+		auto rhs_end_bb = ctx.curr;
+		auto end_bb = ctx.new_bb;
+		rhs_end_bb.succ = [end_bb];
+
+		if (op == IBop.Op.Or)
+			// for Or, cond == true -> end, false -> rhs
+			lhs_end_bb.succ = [end_bb, rhs_bb];
+		else
+			// for And, cond == true -> rhs, false -> end_bb
+			lhs_end_bb.succ = [rhs_bb, end_bb];
+
+		end_bb.inst ~= new Phi([lhs_end_bb, rhs_end_bb], [v1, v2], ret);
+		ctx.curr = end_bb;
 	} else {
 		auto v1 = b.lhs.buildIR(ctx);
 		auto v2 = b.rhs.buildIR(ctx);
@@ -345,6 +407,7 @@ void buildIRImpl(If i, ref Context ctx) {
 	ctx.curr.succ = [end_bb];
 
 	cond_bb.succ = [then_bb, else_bb];
+	ctx.curr = end_bb;
 }
 
 void buildIRImpl(While w, ref Context ctx) {
@@ -368,7 +431,7 @@ void buildIRImpl(Loop w, ref Context ctx) {
 	auto end = ctx.new_bb;
 	ctx.cstack ~= tuple(w.s, end);
 
-	auto body_start = ctx.new_bb_curr;
+	auto body_start = ctx.new_bb_linked;
 	w.body.buildIR(ctx);
 
 	if (w.cond !is null) {
@@ -395,9 +458,9 @@ void buildIRImpl(Block b, ref Context ctx) {
 	foreach(s; b.statements)
 		s.buildIR(ctx);
 	ctx.cstack.popBack;
+	ctx.curr.succ = [bb];
 	ctx.curr = bb;
 }
-
 
 CFG buildIR(Fun f) {
 	Context ctx;

@@ -21,7 +21,8 @@ auto make_param(R)(R i) {
 }
 
 auto make_func(R)(R i, in ref Span span) {
-	return new Fun(i.v!0 == "afn", i.v!1.to!string, i.v!2, i.v!4, i.v!5, span);
+	return new Fun(i.v!0 == "afn", i.v!1.to!string, i.v!2,
+	i.v!3.map_or!((a) => a.v!1)(new BaseType("void")), i.v!4, span);
 }
 
 auto param(I i) {
@@ -76,7 +77,7 @@ alias I = InputType;
 alias to_astnode = wrap!((a) => cast(AstNode)a);
 alias to_stmt = wrap!((a) => cast(Stmt)a);
 
-auto param_list(I i) { return i.pipe!(chain!(ws!param, token_ws!","), wrap!"a.map!\"a.v!0\".array"); }
+auto param_list(I i) { return i.pipe!(chain!(ws!param, token_ws!",", true), wrap!"a.map!\"a.v!0\".array"); }
 auto expression_statement(I i) {
 	return i.pipe!(seq!(expression, token_ws!";"),
 	               wrap!((a) => cast(Stmt)(new ExprStmt(a.v!0))));
@@ -181,8 +182,7 @@ auto func(I i) {
 	       ws!(choice!(token!"fn", token!"afn")),
 	       ws!identifier,
 	       ws!(between!(ws!(token!"("), ws!param_list, ws!(token!")"))),
-	       ws!(token!"->"),
-	       type,
+	       optional!(seq!(ws!(token!"->"), type)),
 	       block
 	)), wrap!make_func);
 }

@@ -71,6 +71,7 @@ TypeDecl[] builtin_types() {
 		new NumTypeDecl(),
 		new BoolTypeDecl(),
 		new StringTypeDecl(),
+		new VoidTypeDecl(),
 	];
 }
 
@@ -88,6 +89,8 @@ class NumTypeDecl: TypeDecl { this() { super("num"); } }
 class BoolTypeDecl: TypeDecl { this() { super("bool"); } }
 
 class StringTypeDecl: TypeDecl { this() { super("string"); } }
+
+class VoidTypeDecl: TypeDecl { this() { super("void"); } }
 
 final class BaseType : Type {
 	TypeDecl decl;
